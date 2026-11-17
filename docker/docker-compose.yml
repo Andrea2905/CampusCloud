@@ -1,0 +1,137 @@
+name: campus-cloud-proyect
+
+services:
+  postgres-cloud:
+    image: postgres:16-bookworm
+    container_name: campuscloud-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-campuscloud}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - campus-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2025-CU8-ubuntu-24.04
+    container_name: campuscloud-sqlserver
+    restart: always
+    environment:
+      ACCEPT_EULA: ${ACCEPT_EULA:-Y}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - campus-network
+
+  pgadmin:
+    image: dpage/pgadmin4:6.17
+    container_name: campuscloud-pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - "${PGADMIN_PORT:-8082}:80"
+    depends_on:
+      postgres-cloud:
+        condition: service_healthy
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - campus-network
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: campuscloud-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH}
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - campus-network
+
+  mongo:
+    image: mongo:8.0.8-noble
+    container_name: campuscloud-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    ports:
+      - "${MONGO_PORT:-27018}:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - campus-network
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  cassandra:
+    image: cassandra:4.1
+    container_name: campuscloud-cassandra
+    restart: unless-stopped
+    # Activa la autenticación y los permisos antes de arrancar.
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        sed -i 's/^authenticator:.*/authenticator: PasswordAuthenticator/' /etc/cassandra/cassandra.yaml &&
+        sed -i 's/^authorizer:.*/authorizer: CassandraAuthorizer/' /etc/cassandra/cassandra.yaml &&
+        exec docker-entrypoint.sh cassandra -f
+    environment:
+      CASSANDRA_CLUSTER_NAME: CampusCloud
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+      CQL_ADMIN_PASSWORD: ${CQL_ADMIN_PASSWORD}
+      CQL_LECTOR_PASSWORD: ${CQL_LECTOR_PASSWORD}
+    ports:
+      - "${CASSANDRA_PORT:-9042}:9042"
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    networks:
+      - campus-network
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status | grep -q '^UN'"]
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  postgres_data:
+    name: campuscloud_postgres_data
+  pgadmin_data:
+    name: campuscloud_pgadmin_data
+  sqlserver_data:
+    name: campuscloud-sql-data
+  neo4j_data:
+    name: campuscloud_neo4j_data
+  mongo_data:
+    name: campuscloud_mongo_data
+  cassandra_data:
+    name: campuscloud_cassandra_data
+
+networks:
+  campus-network:
+    name: campuscloud_net
